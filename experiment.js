@@ -10,8 +10,8 @@ const CONFIG = {
   keys: {
     match: "j",
     nonmatch: "f",
-    house: "f",
-    face: "j"
+    house: "j",
+    face: "f"
   },
   nback_trials: 16,
   image_trials_per_block: 80,
@@ -48,7 +48,7 @@ const jsPsych = initJsPsych({
     document.body.innerHTML = `
       <div style="${CONFIG.styles.centerBox}; background-color:#808080; width:100%; height:100%; display:flex; flex-direction:column; justify-content:center; align-items:center;">
         <h1 style="font-size:32px; margin-bottom:20px; color:white;">✅ 实验已完成！</h1>
-        <p style="font-size:18px; margin:20px 0; color:white;">感谢你的参与！数据已自动保存。</p>
+        <p style="font-size:18px; margin:20px 0; color:white;">感谢您的参与！数据已自动保存，请您下载并发送给被试。</p>
       </div>
     `;
   }
@@ -97,7 +97,12 @@ const templates = {
     button_html: '<button class="jspsych-btn">%choice%</button>'
   }),
 
-  practiceEnd: (taskName, isLastRound) => ({
+  practiceEnd: (taskName, isLastRound) => {
+  const keyReminder = taskName.includes("数字")
+    ? `<p style="font-size:22px; line-height:1.8;">F = 不同<br>J = 相同</p>`
+    : `<p style="font-size:22px; line-height:1.8;">F = 人脸<br>J = 房子</p>`;
+
+  return {
     type: jsPsychHtmlButtonResponse,
     stimulus: `
       <div style="${CONFIG.styles.centerBox}; color:white;">
@@ -105,7 +110,11 @@ const templates = {
         ${
           isLastRound
             ? '<p style="font-size:18px;">练习已达到最大次数，准备进入下一阶段！</p>'
-            : '<p style="font-size:18px;">是否已充分理解？</p><p style="font-size:16px; color:#ddd;">点击"继续"或"再练一次"</p>'
+            : `
+              <p style="font-size:18px;">是否已充分理解？</p>
+              ${keyReminder}
+              <p style="font-size:16px; color:#ddd;">点击"继续"或"再练一次"</p>
+            `
         }
       </div>
     `,
@@ -115,7 +124,8 @@ const templates = {
       repeat_practice = !isLastRound && data.response === 1;
       practice_round++;
     }
-  })
+  };
+},
 };
 
 // =============================================================================
@@ -137,7 +147,7 @@ function makeImageTrial(stimulus, tone, data_extra = {}) {
       stimulus: audio[tone],
       choices: "NO_KEYS",
       trial_ends_after_audio: true,
-      trial_duration: 3000
+      trial_duration: 2000
     },
     {
       type: jsPsychHtmlKeyboardResponse,
@@ -285,26 +295,38 @@ function buildImageBlock(isoPractice = false, numTrials = 12) {
 const instructions = {
   overview: `
     <ol style="line-height:2.2; margin-left:20px; font-size:17px; color:black;">
-      <li><b>学习阶段 1：2-back任务指导语 + 练习</b></li>
-      <li><b>学习阶段 2：图片任务指导语 + 练习</b></li>
-      <li><b>正式实验顺序：2-back —— 图片任务 —— 2-back —— 图片任务</b></li>
+      <li><b>学习阶段 1：数字判断任务指导语 + 练习</b></li>
+      <li><b>学习阶段 2：图片预测任务指导语 + 练习</b></li>
+      <li><b>正式实验顺序：数字任务 —— 图片任务 —— 数字任务 —— 图片任务</b></li>
     </ol>
   `,
 
   nback: `
-    <p style="color:black;">判断当前数字是否与<b>往前数第2个数字</b>相同？</p>
-    <div style="${CONFIG.styles.blockBox}">
-      <p><b>按 J 键</b> → <b>相同</b></p>
-      <p><b>按 F 键</b> → <b>不同</b></p>
-    </div>
+    <p style="color:black; line-height:1.8;">你将看到一串一个接一个出现的数字。你的任务是判断：</p>
+    <ul style="text-align:left; color:black; line-height:1.8;">
+      <li>当前数字是否与<strong>往前数第2个数字</strong>相同；</li>
+      <li>如果<strong>相同</strong>，请按“J”键；</li>
+      <li>如果<strong>不同</strong>，请按“F”键；</li>
+      <li>请尽量快速且准确地反应。</li>
+   </ul>
+    <p style="color:black; line-height:1.8;">例如：<strong>2、7、2、5</strong>……当第三个数字 <strong>2</strong> 出现时，它要和第一位数字 <strong>2</strong> 比较，2与2相同按J；当第四个数字 <strong>5</strong> 出现时，它要和第二位数字 <strong>7</strong> 比较，5与7不同按F。</p>
   `,
 
   image: `
-    <p style="color:black;">听到声音后，预测接下来出现的图片类型</p>
-    <div style="${CONFIG.styles.blockBox}">
-      <p><b>按 F 键</b> → 预测 <b>房子</b></p>
-      <p><b>按 J 键</b> → 预测 <b>人脸</b></p>
-    </div>
+    <p style="color:black; line-height:1.8;">你的任务是听到声音后，预测接下来出现的图片类型并按键：</p>
+    <ul style="text-align:left; color:black; line-height:1.8;">
+      <li>预测接下来的图片是房子，请按“J”键；</li>
+      <li>预测接下来的图片是人脸，请按“F”键；</li>
+      <li>请尽量快速且准确地反应。</li>
+   </ul>
+    <p><b>每个试次的步骤如下：</b></p>
+    <ol style="line-height:2.1;">
+      <li>屏幕中央先出现 <b>+</b>，请注视中央。</li>
+      <li>你会听到一段声音。</li>
+      <li>声音结束后，请尽快按键判断接下来会出现什么图片。</li>
+      <li>图片出现时，会在四个角中的一个位置显示反馈表情。</li>
+    </ol>
+    <p>若答对，会反馈😊；若答错，会反馈😞；若无反应，会反馈😐。</p>
   `
 };
 
@@ -330,7 +352,6 @@ let timeline = [
               <option value="">请选择</option>
               <option value="男性">男性</option>
               <option value="女性">女性</option>
-              <option value="其他">其他</option>
             </select>
           </label>
         </p>
@@ -360,7 +381,7 @@ function addPracticeLoop(taskName, buildFunc, numRounds = 3) {
   timeline.push(
     templates.instruction(
       `任务：${taskName}`,
-      taskName.includes("2-back") ? instructions.nback : instructions.image,
+      taskName.includes("数字判断任务") ? instructions.nback : instructions.image,
       "进入练习"
     )
   );
@@ -388,7 +409,7 @@ function addPracticeLoop(taskName, buildFunc, numRounds = 3) {
 }
 
 // 添加练习
-addPracticeLoop("2-back 数字任务", () => buildNBackBlock(0, 12, true), 3);
+addPracticeLoop("数字判断任务", () => buildNBackBlock(0, 12, true), 3);
 addPracticeLoop("图片预测任务", () => buildImageBlock(true, 12), 3);
 
 // =============================================================================
@@ -422,14 +443,14 @@ const blocks = [
   { name: "Block 1 (稳定)", trials: allTrials.slice(0, 80) },
   { name: "Block 2 (变化)", trials: allTrials.slice(80, 160) },
   { name: "Block 3 (稳定)", trials: allTrials.slice(160, 240) },
-  { name: "Block 4 (变化)", trials: allTrials.slice(240) }
+  { name: "Block 4 (变化)", trials: allTrials.slice(240,320) }
 ];
 
 blocks.forEach((block, idx) => {
   if (idx === 0) {
     timeline.push({
       type: jsPsychHtmlKeyboardResponse,
-      stimulus: `<div style="${CONFIG.styles.centerBox}; color:white;">正式任务插入：<b>16 试次 2-back</b><br/>按任意键开始</div>`,
+      stimulus: `<div style="${CONFIG.styles.centerBox}; color:white;">正式数字判断任务：<b>16 试次 2-back</b><br/>按任意键开始</div>`,
       choices: "ALL_KEYS"
     });
     timeline.push(...buildNBackBlock(1, 16, false));
