@@ -14,6 +14,7 @@
     <script src="https://unpkg.com/@jspsych/plugin-preload@1.1.3"></script>
 
     <style>
+        /* 1. 全屏强制垂直居中，不显示任何滚动条 */
         body, html {
             margin: 0;
             padding: 0;
@@ -21,9 +22,13 @@
             width: 100%;
             background-color: #808080;
             color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
             overflow: hidden !important;
         }
 
+        /* 强制 jsPsych 的所有容器完全填充并居中 */
         #jspsych-target,
         .jspsych-display-element,
         .jspsych-content-wrapper,
@@ -37,44 +42,21 @@
             overflow: hidden !important;
         }
 
-        .fixation {
-            font-size: 48px;
-            line-height: 1;
-        }
-
-        .feedback-wrapper {
-            position: relative;
-            width: 330px;
-            height: 360px;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-            overflow: visible;
-        }
-
+        /* 椭圆遮罩容器 */
         .oval-container {
             width: 200px;
             height: 270px;
             margin: 0 auto;
             overflow: hidden;
-            border-radius: 50% / 48%;
+            border-radius: 50%;
             background-color: #808080;
             display: flex;
             justify-content: center;
             align-items: center;
-            position: relative;
-            box-shadow: 0 0 10px rgba(0, 0, 0, 0.08);
+            border: none;
         }
 
-        .oval-container::after {
-            content: "";
-            position: absolute;
-            inset: 0;
-            border-radius: inherit;
-            box-shadow: inset 0 0 12px rgba(0, 0, 0, 0.12);
-            pointer-events: none;
-        }
-
+        /* 人脸：大幅放大裁剪，只保留脸部，尽量去掉肩膀和身体 */
         .stimulus-face {
             height: 230%;
             width: auto;
@@ -82,29 +64,62 @@
             object-position: center 35%;
         }
 
+        /* 房屋 */
         .stimulus-house {
             height: 110%;
             width: auto;
             object-fit: contain;
         }
 
-        .feedback-emoji {
-            position: absolute;
-            font-size: 42px;
-            z-index: 20;
-            line-height: 1;
-            pointer-events: none;
-            text-shadow: 0 0 2px rgba(0, 0, 0, 0.2);
-        }
-
-        .top-left { top: 12px; left: 12px; }
-        .top-right { top: 12px; right: 12px; }
-        .bottom-left { bottom: 12px; left: 12px; }
-        .bottom-right { bottom: 12px; right: 12px; }
-
         .jspsych-btn {
             margin-top: 20px;
             padding: 10px 20px;
+        }
+
+        .fixation {
+            font-size: 48px;
+            line-height: 1;
+            text-align: center;
+            color: white;
+        }
+
+        .digit {
+            font-size: 72px;
+            line-height: 1;
+            text-align: center;
+            color: white;
+        }
+
+        .feedback {
+            font-size: 48px;
+            line-height: 1;
+            text-align: center;
+            color: white;
+        }
+
+        .correct {
+            color: #7cfc00;
+        }
+
+        .wrong {
+            color: #ff6b6b;
+        }
+
+        .exp-panel {
+            max-width: 720px;
+            margin: 0 auto;
+            text-align: center;
+            line-height: 2;
+            color: white;
+        }
+
+        .exp-panel ul {
+            display: inline-block;
+            text-align: left;
+        }
+
+        .continue-text {
+            margin-top: 40px;
         }
     </style>
 </head>
