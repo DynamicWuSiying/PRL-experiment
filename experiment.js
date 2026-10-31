@@ -39,6 +39,7 @@ const CONFIG = {
 let subject_id = "unknown";
 let practice_round = 1;
 let repeat_practice = false;
+let skip_to_formal = false;
 let nback_history = [];
 
 /* ---------------------- ② 状态变量 + 伪随机 ---------------------- */
@@ -59,6 +60,163 @@ function soundRandom01() {
 }
 
 const pick = (arr) => arr[Math.floor(random01() * arr.length)];
+
+
+// 正式图片任务专用：使用本实验 PRNG 的洗牌函数，保证序列可复现
+function shuffleWithPRNG(arr) {
+  const a = arr.slice();
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(random01() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// 计算当前序列末尾某个字段的连续重复长度
+function currentRunLength(seq, key) {
+  if (seq.length === 0) return 0;
+  const lastVal = seq[seq.length - 1][key];
+  let len = 0;
+  for (let i = seq.length - 1; i >= 0; i--) {
+    if (seq[i][key] === lastVal) len++;
+    else break;
+  }
+  return len;
+}
+
+// 判断把 candidate 接到当前 segment 序列后，是否违反连续重复约束
+function violatesSegmentConstraints(seq, candidate, constraints = {}) {
+  const maxToneRun = constraints.maxToneRun ?? 3;
+  const maxCategoryRun = constraints.maxCategoryRun ?? 3;
+  const maxPairRun = constraints.maxPairRun ?? 2;
+
+  if (seq.length === 0) return false;
+
+  // 1) 高/低音连续次数限制
+  const toneRun = currentRunLength(seq, "tone");
+  if (toneRun >= maxToneRun && seq[seq.length - 1].tone === candidate.tone) {
+    return true;
+  }
+
+  // 2) 房屋/人脸连续次数限制
+  const categoryRun = currentRunLength(seq, "categoryName");
+  if (
+    categoryRun >= maxCategoryRun &&
+    seq[seq.length - 1].categoryName === candidate.categoryName
+  ) {
+    return true;
+  }
+
+  // 3) 同一个 tone-category 组合连续次数限制，例如 high-house 连续出现
+  let pairRun = 0;
+  for (let i = seq.length - 1; i >= 0; i--) {
+    if (
+      seq[i].tone === seq[seq.length - 1].tone &&
+      seq[i].categoryName === seq[seq.length - 1].categoryName
+    ) {
+      pairRun++;
+    } else {
+      break;
+    }
+  }
+
+  if (
+    pairRun >= maxPairRun &&
+    seq[seq.length - 1].tone === candidate.tone &&
+    seq[seq.length - 1].categoryName === candidate.categoryName
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+// 在固定 composition 的前提下，对一个 segment 内的 trial 进行约束洗牌
+function constrainedShuffleSegment(items, constraints = {}, maxAttempts = 1000) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    const remaining = shuffleWithPRNG(items);
+    const seq = [];
+
+    while (remaining.length > 0) {
+      const candidates = [];
+
+      for (let i = 0; i < remaining.length; i++) {
+        if (!violatesSegmentConstraints(seq, remaining[i], constraints)) {
+          candidates.push(i);
+        }
+      }
+
+      if (candidates.length === 0) break;
+
+      const chosenPos = candidates[Math.floor(random01() * candidates.length)];
+      seq.push(remaining.splice(chosenPos, 1)[0]);
+    }
+
+    if (seq.length === items.length) {
+      return seq;
+    }
+  }
+
+  // 理论上很少发生；若失败则退回普通 PRNG 洗牌，保证实验不中断
+  console.warn("constrainedShuffleSegment failed; fallback to PRNG shuffle.");
+  return shuffleWithPRNG(items);
+}
+
+// 根据 pHigh 构造一个 segment 内严格平衡的 tone-category 组合
+// 对 segSize = 20：高音 10 次、低音 10 次，同时 house/face 总数也各 10 次。
+function buildBalancedSegmentItems(pHigh, segSize) {
+  if (segSize % 2 !== 0) {
+    throw new Error("segSize must be even for balanced high/low tones.");
+  }
+
+  const nEachTone = segSize / 2;
+
+  const highHouse = Math.round(pHigh * nEachTone);
+  const highFace = nEachTone - highHouse;
+
+  const lowHouse = Math.round((1 - pHigh) * nEachTone);
+  const lowFace = nEachTone - lowHouse;
+
+  const items = [];
+
+  for (let i = 0; i < highHouse; i++) {
+    items.push({
+      tone: "high",
+      categoryName: "house",
+      p_house_given_tone: pHigh,
+      probability_high_house: pHigh
+    });
+  }
+
+  for (let i = 0; i < highFace; i++) {
+    items.push({
+      tone: "high",
+      categoryName: "face",
+      p_house_given_tone: pHigh,
+      probability_high_house: pHigh
+    });
+  }
+
+  for (let i = 0; i < lowHouse; i++) {
+    items.push({
+      tone: "low",
+      categoryName: "house",
+      p_house_given_tone: 1 - pHigh,
+      probability_high_house: pHigh
+    });
+  }
+
+  for (let i = 0; i < lowFace; i++) {
+    items.push({
+      tone: "low",
+      categoryName: "face",
+      p_house_given_tone: 1 - pHigh,
+      probability_high_house: pHigh
+    });
+  }
+
+  return items;
+}
 
 const isTwoBackMatch = (history, cur) =>
   history.length >= 2 && history[history.length - 2] === cur;
@@ -177,10 +335,24 @@ const INSTRUCTIONS = {
     <p>例如：2、7、2、5。 第三个数字 2 与第一个数字 2 相同，按 J； 第四个数字 5 与第二个数字 7 不同，按 F。</p>`,
 
   image: `
-    <p>请按照屏幕提示完成图片预测任务。 每次会先听到一个声音，请根据声音预测接下来会出现的人脸或房屋。</p>
-    <ul><li>预测人脸：按 <b>F</b>。</li><li>预测房屋：按 <b>J</b>。</li><li>请保持注意力集中，并尽量快速、准确地按键。</li></ul>
-    <p>声音结束后，请在中央注视点出现时进行预测。 按键后会呈现真实图片；如果没有按键，也会呈现真实图片。</p>
-    <p>练习时会显示“正确”“错误”或“无反应”。 正式任务中不显示这些文字反馈。</p>`,
+  <p>接下来是图片预测任务，每一轮试次中会依次听音-按键-呈现图-间隔-听音……</p>
+  <p>①听音：你会听到一个声音并同时看到“＋”。</p>
+  <p><b>②按键：声音结束后，请你根据刚才听到的声音，尽可能快预测图片并按键。</b></p>
+  <ul>
+    <li>如果你预测接下来会出现<b>人脸</b>，请按 <b>F</b>。</li>
+    <li>如果你预测接下来会出现<b>房屋</b>，请按 <b>J</b>。</li>
+  </ul>
+  <p>③呈现图：你按键之后或2秒后，屏幕上会呈现真实出现的图片。请注意，真实图片有时可能和你的预测不同。</p>
+  <p>提示：声音和图片之间可能存在一定的概率关系。也就是说，某一种声音后面可能更常出现某一类图片，但并不是每次都一定出现这一类图片。，且概率是会变化的</p>
+  <p>提示：请你在任务过程中根据经验逐渐学习这种关系，并在每一轮中做出当前认为最可能的预测。</p>
+  <p><b>练习阶段</b>主要是为了让你熟悉流程和按键，没有规律，不用在意准确与否。练习时会显示“正确”“错误”或“无反应”反馈。</p>
+  <p><b>正式实验阶段</b>不会再显示反馈，但任务流程和按键方式相同。请你继续根据声音和随后出现的图片，逐渐学习它们之间的关系。</p>
+  <p style="font-size:22px; line-height:1.8;">
+    <b>请记住：</b><br>
+    F = 人脸<br>
+    J = 房屋
+  </p>
+`,
 
   sound: `
     <p>接下来会听到两种不同的声音。</p>
@@ -213,7 +385,7 @@ const repeatEndScreen = ({ title, body, confirm, repeat, lineHeight = 2.5, data 
 const PRACTICE_END = (taskName) =>
   repeatEndScreen({
     title: `${taskName}练习结束`,
-    confirm: "继续",
+    confirm: "进入下一步",
     repeat: "再练一次",
     body: (isLast) =>
       isLast
@@ -222,13 +394,13 @@ const PRACTICE_END = (taskName) =>
            <p style="font-size:22px;">${
              taskName.includes("数字") ? "F = 不同<br>J = 相同" : "F = 人脸<br>J = 房屋"
            }</p>
-           <p>点击“继续”或“再练一次”。</p>`
+           <p>点击“进入下一步”或“再练一次”。</p>`
   });
 
 // 声音熟悉的结束页：确认听辨结果 +（非末轮）可再听一轮
 const SOUND_END = repeatEndScreen({
   title: "声音熟悉完成",
-  confirm: "我能听出两种不同的声音",
+  confirm: "我能听出两种不同的声音，进入下一步",
   repeat: "再听一次",
   lineHeight: 2,
   data: {
@@ -270,6 +442,16 @@ function makeImageTrial(stimulus, tone, extra = {}) {
       onFinish: (data) => {
         data.correct = data.response === data.correctKey;
         data.miss = data.response === null;
+
+        // 被试选择是否为 house：house = 1, face = 0, 漏反应 = null
+        if (data.response === CONFIG.keys.house) {
+          data.response_house = 1;
+        } else if (data.response === CONFIG.keys.face) {
+          data.response_house = 0;
+        } else {
+          data.response_house = null;
+        }
+
         result = { correct: data.correct, miss: data.miss };
       }
     }),
@@ -446,23 +628,56 @@ function buildSoundFamiliarization(round = null) {
 
 function buildImageBlock(probs, segSize, phaseLabel) {
   const block = [];
-  let index = 0;
+  let trialIndexInBlock = 0;
 
-  probs.forEach((pHigh) => {
-    for (let i = 0; i < segSize; i++, index++) {
-      const tone = random01() < 0.5 ? "high" : "low";
-      const pHouse = tone === "high" ? pHigh : 1 - pHigh;
-      const category = random01() < pHouse ? stimuli.house : stimuli.face;
+  // 正式任务 segment 内约束：
+  // 1. 高/低音最多连续 3 次
+  // 2. 房屋/人脸最多连续 3 次
+  // 3. 同一 tone-category 组合最多连续 2 次
+  const constraints = {
+    maxToneRun: 3,
+    maxCategoryRun: 3,
+    maxPairRun: 2
+  };
+
+  probs.forEach((pHigh, segmentIndex) => {
+    // 每个 segment 先生成固定数量的四类组合，再约束洗牌。
+    // 例如 segSize = 20, pHigh = 0.8：
+    // high-house = 8, high-face = 2, low-house = 2, low-face = 8。
+    const segmentItems = buildBalancedSegmentItems(pHigh, segSize);
+    const orderedItems = constrainedShuffleSegment(segmentItems, constraints);
+
+    orderedItems.forEach((item, trialIndexInSegment) => {
+      trialIndexInBlock++;
+
+      const category = item.categoryName === "house" ? stimuli.house : stimuli.face;
       const stimulus = pick(category);
 
       block.push(
-        ...makeImageTrial(stimulus, tone, {
+        ...makeImageTrial(stimulus, item.tone, {
           phase: phaseLabel,
-          trialInBlock: index + 1,
-          probability_high_house: pHigh
+
+          // block 内 trial 编号：1-80
+          trialInBlock: trialIndexInBlock,
+
+          // segment 编号：1-4
+          segmentInBlock: segmentIndex + 1,
+
+          // segment 内 trial 编号：1-20
+          trialInSegment: trialIndexInSegment + 1,
+
+          // 当前 segment 设定的 P(house | high tone)
+          probability_high_house: item.probability_high_house,
+
+          // 当前 trial 的 tone 对应的真实 P(house | tone)
+          p_house_given_tone: item.p_house_given_tone,
+
+          // 当前 trial 的真实 outcome，方便后续模型分析
+          category: item.categoryName,
+          outcome_house: item.categoryName === "house" ? 1 : 0
         })
       );
-    }
+    });
   });
 
   return block;
@@ -471,26 +686,44 @@ function buildImageBlock(probs, segSize, phaseLabel) {
 function buildImagePractice(numTrials, round = null) {
   const block = [];
 
-  const list = jsPsych.randomization.shuffle([
-    ...Array(Math.floor(numTrials / 2)).fill(stimuli.face[0]),
-    ...Array(Math.ceil(numTrials / 2)).fill(stimuli.house[0])
+  // 练习阶段只用于熟悉流程和按键，不训练正式实验中的声音-图片概率关系。
+  // 因此，高音和低音各半，人脸和房屋各半，但二者之间不形成稳定对应关系。
+
+  const half = Math.floor(numTrials / 2);
+
+  const tones = jsPsych.randomization.shuffle([
+    ...Array(half).fill("high"),
+    ...Array(numTrials - half).fill("low")
   ]);
 
-  list.forEach((stimulus, index) => {
-    const tone = random01() < 0.5 ? "high" : "low";
+  const categories = jsPsych.randomization.shuffle([
+    ...Array(half).fill("face"),
+    ...Array(numTrials - half).fill("house")
+  ]);
+
+  for (let index = 0; index < numTrials; index++) {
+    const tone = tones[index];
+    const categoryName = categories[index];
+
+    const category = categoryName === "house" ? stimuli.house : stimuli.face;
+    const stimulus = pick(category);
 
     block.push(
       ...makeImageTrial(stimulus, tone, {
         phase: "practice_image",
         trialInPhase: index + 1,
-        probability_high_house: null,
+
+        // 练习阶段为中性概率，不代表正式实验的概率结构。
+        probability_high_house: 0.5,
+
         ...withRound(round)
       })
     );
-  });
+  }
 
   return block;
 }
+
 
 /* --------------------------- ⑨ 时间线组装 --------------------------- */
 const timeline = [
@@ -530,7 +763,43 @@ const timeline = [
     }
   },
 
-  instructionScreen("实验流程总览", INSTRUCTIONS.overview, "下一页")
+  buttonTrial({
+    stimulus: whiteCard(`
+      <h2>请选择实验流程</h2>
+      <p>如果你是正式参加实验，请选择“按正常流程开始”。</p>
+      <p>如果你已经熟悉任务，或者只是测试程序，可以选择“跳过练习，直接进入正式实验”。</p>
+      <p style="font-size:20px; line-height:1.8;">
+        <b>正式实验按键规则：</b><br>
+        数字任务：F = 不同，J = 相同<br>
+        图片任务：F = 人脸，J = 房屋
+      </p>
+    `, 2.0),
+
+    choices: [
+      "按正常流程开始",
+      "跳过练习，直接进入正式实验"
+    ],
+
+    data: {
+      event: "flow_choice"
+    },
+
+    onFinish: (data) => {
+      skip_to_formal = data.response === 1;
+      data.skip_to_formal = skip_to_formal;
+
+      jsPsych.data.addProperties({
+        skip_to_formal: skip_to_formal
+      });
+    }
+  }),
+
+  {
+    timeline: [
+      instructionScreen("实验流程总览", INSTRUCTIONS.overview, "下一页")
+    ],
+    conditional_function: () => !skip_to_formal
+  }
 ];
 
 // 可重复阶段：指导语 → 最多 numRounds 轮（每轮结束页可再重复一次）→ 复位计数
@@ -543,14 +812,22 @@ function addRepeatableBlock({
   nextBtn = "进入练习",
   numRounds = CONFIG.max_practice_rounds
 }) {
-  timeline.push(instructionScreen(title, instruction, nextBtn));
+  timeline.push({
+    timeline: [
+      instructionScreen(title, instruction, nextBtn)
+    ],
+    conditional_function: () => !skip_to_formal
+  });
 
   for (let round = 1; round <= numRounds; round++) {
     timeline.push({
       timeline: [...buildFunc(round), endScreen(round === numRounds)],
       conditional_function: () =>
-        round === 1 ||
-        (repeat_practice && practice_round <= CONFIG.max_practice_rounds)
+        !skip_to_formal &&
+        (
+          round === 1 ||
+          (repeat_practice && practice_round <= CONFIG.max_practice_rounds)
+        )
     });
   }
 
@@ -560,12 +837,14 @@ function addRepeatableBlock({
     stimulus: "",
     choices: NO_KEYS,
     trial_duration: 0,
+    conditional_function: () => !skip_to_formal,
     on_start: () => {
       practice_round = 1;
       repeat_practice = false;
     }
   });
 }
+
 
 /* 1. 数字判断任务练习（最多 3 轮） */
 addRepeatableBlock({
@@ -598,8 +877,7 @@ addRepeatableBlock({
 timeline.push(
   htmlTrial({
     stimulus: whiteCard(`
-      <h2>准备开始正式实验</h2>
-      <p>你已完成所有练习。</p>
+      <h2>你已完成所有练习。准备开始正式实验</h2>
       <p>接下来先完成数字任务，再完成图片任务。</p>
       <p>数字任务：<b>F = 不同，J = 相同</b></p>
       <p>图片任务：<b>F = 人脸，J = 房屋</b></p>
@@ -610,6 +888,42 @@ timeline.push(
 );
 
 timeline.push(...buildNBackBlock(CONFIG.nback_trials, false));
+
+// 正式数字任务结束后，提示被试按键进入正式图片预测任务
+// 这里不再进入练习，只是重新提醒图片任务的按键和规则。
+timeline.push(
+  htmlTrial({
+    stimulus: instructionCard(
+      "正式数字任务结束，接下来进入图片预测任务",
+      `
+      <p>你已经完成正式数字判断任务。</p>
+      <p>接下来是正式图片预测任务。任务流程如下：</p>
+      <p>① 你会先听到一个声音，同时看到屏幕中央的“＋”。</p>
+      <p><b>② 声音结束后，请根据刚才听到的声音，尽可能快地预测接下来会出现哪一类图片，并按键。</b></p>
+      <ul>
+        <li>如果你预测接下来会出现<b>人脸</b>，请按 <b>F</b>。</li>
+        <li>如果你预测接下来会出现<b>房屋</b>，请按 <b>J</b>。</li>
+      </ul>
+      <p>③ 你按键之后或时间结束后，屏幕上会呈现真实出现的图片。</p>
+      <p>请注意：声音和图片之间可能存在一定的概率关系，但并不是每次都完全对应，而且这种关系可能会发生变化。</p>
+      <p>请你根据任务过程中的经验，逐渐学习声音和图片之间的关系，并在每一轮中做出当前认为最可能的预测。</p>
+      <p style="font-size:22px; line-height:1.8; text-align:center;">
+        <b>请记住：</b><br>
+        F = 人脸<br>
+        J = 房屋
+      </p>
+      <p style="margin-top:30px; text-align:center;">准备好后，请按任意键开始正式图片预测任务。</p>
+      `
+    ),
+    choices: "ALL_KEYS",
+    data: {
+      task: "transition",
+      phase: "before_formal_image",
+      event: "instruction"
+    }
+  })
+);
+
 timeline.push(...buildImageBlock([0.8], 80, "image_block1"));
 timeline.push(...buildImageBlock([0.1, 0.9, 0.1, 0.9], 20, "image_block2"));
 
